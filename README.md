@@ -1,4 +1,4 @@
-# PetitionSpammer
+# PetitionSigner
 
 An app designed to spam sign petitions on https://campaniamea.declic.ro/petitions/
 using proxies in order to avoid ip block and protect identity.
