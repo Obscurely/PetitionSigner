@@ -6,7 +6,11 @@ Also multi threaded in order to ensure spamming more efficient.
 
 ## About proxies
 
+<<<<<<< HEAD
 The proxies are gathered from https://proxyscrape.com/free-proxy-list they are http proxies used with a 3000ms max timeout set. These proxies are slow because they are public and a lot o people just use them like this so if you want high speed you would want a paid service that can give you a fast proxy on demand, if you would get that and a request would take 1 second and 32 threads do it all together so there is 32 signs per second meaning 115200 per hours that would be insane, but also very expensive.
+=======
+The proxies are gathered from https://proxyscrape.com/free-proxy-list they are http proxies used with a 3000ms max timeout set. These proxies are slow because they are public and a lot o people just use them like this so if you want high speed you would want a paid service that can give you a fast proxy on demand, if you would get that and a request would take 1 second and 32 threads do it all togheter so there is 32 signs per second meaning 115200 per hours that would be insane, but also very expensive.
+>>>>>>> cb8f2660a66905261453e87392d3be6ff77fc967
 
 ## About multi threading
 
