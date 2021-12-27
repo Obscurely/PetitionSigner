@@ -28,8 +28,6 @@ namespace PetitionSpammer
         };
         private const string _authenticityTokenPattern = "(?<=content=\"authenticity_token\" />\n.+content=\").+(?=\" />)";
         private const string _agraSessionPattern = "(?<=_agra_session=).+(?=; path=/; secure; HttpOnly; SameSite=Lax)";
-        private Random _rand;
-        private HttpClient _client = new();
         private string _authenticityToken = string.Empty;
         private const string _cookieBase = "agreed_cookies=all; _agra_session=$AGRA_SESSION";
         private string _cookie = string.Empty;
@@ -39,14 +37,16 @@ namespace PetitionSpammer
         private string[] _firstNames;
         private string[] _lastNames;
         private string[] _counties;
+        private HttpClient _clientWithoutProxy = new();
+        private HttpClient _clientWithProxy;
+        private HttpClientHandler _clientHandler;
+        private readonly WebProxy _proxy = new();
 
         private string PetitionUrl { get { return _petitionUrl; } }
         private string PetitionSignUrl { get { return _petitionSignUrl; } }
         private Dictionary<string, string> RequestBody { get { return _requestBody; } }
         private string AuthenticityTokenPattern { get { return _authenticityTokenPattern; } }
         private string AgraSessionPattern { get { return _agraSessionPattern; } }
-        private Random Rand { get { return _rand; } set { _rand = value; } }
-        private HttpClient Client { get { return _client; } set { _client = value; } }
         private string AuthenticityToken { get { return _authenticityToken; } }
         private string CookieBase { get { return _cookieBase; } }
         private string Cookie { get { return _cookie; } }
@@ -56,37 +56,38 @@ namespace PetitionSpammer
         private string[] FirstNames { get { return _firstNames; } }
         private string[] LastNames { get { return _lastNames; } }
         private string[] Counties { get { return _counties; } }
+        private HttpClient ClientWithoutProxy { get { return _clientWithoutProxy; } }
+        private HttpClient ClientWithProxy { get { return _clientWithProxy; } set { _clientWithProxy = value; } }
+        private HttpClientHandler ClientHandler { get { return _clientHandler; } set { _clientHandler = value; } }
+        private WebProxy Proxy { get { return _proxy; } }
 
         /// <summary>
-        /// Empty private constructor for the async create method.
-        /// </summary>
-        private PetitionSpammer()
-        {
-            // empty constructor for the async create method
-        }
-
-        /// <summary>
-        /// Async creates a petition spammer object with the given petition name (name in the url like nu-vrem-teze-anul-asta 
+        /// Creates a petition spammer object with the given petition name (name in the url like nu-vrem-teze-anul-asta
         /// in the url https://campaniamea.declic.ro/petitions/nu-vrem-teze-anul-asta)
         /// </summary>
         /// <param name="petitionNameFromUrl">Name in the url like nu-vrem-teze-anul-asta in the url https://campaniamea.declic.ro/petitions/nu-vrem-teze-anul-asta</param>
-        /// <returns>A petition spammer object.</returns>
-        public static async Task<PetitionSpammer> AsyncCreatePetitionSpammer(string petitionNameFromUrl)
+        public PetitionSpammer(string petitionNameFromUrl, int proxyTimeoutMs)
         {
-            PetitionSpammer petitionSpammer = new();
-            petitionSpammer._petitionUrl = petitionSpammer._petitionUrl.Replace("$PETITION_NAME", petitionNameFromUrl);
-            petitionSpammer._petitionSignUrl = petitionSpammer._petitionSignUrl.Replace("$PETITION_NAME", petitionNameFromUrl);
+            _petitionUrl = _petitionUrl.Replace("$PETITION_NAME", petitionNameFromUrl);
+            _petitionSignUrl = _petitionSignUrl.Replace("$PETITION_NAME", petitionNameFromUrl);
 
 
             // load first names
-            petitionSpammer._firstNames = await File.ReadAllLinesAsync(petitionSpammer.FirstNamesFileName);
+            _firstNames = File.ReadAllLines(FirstNamesFileName);
             // load last names
-            petitionSpammer._lastNames = await File.ReadAllLinesAsync(petitionSpammer.LastNamesFileName);
+            _lastNames = File.ReadAllLines(LastNamesFileName);
             // load counties
-            petitionSpammer._counties = await File.ReadAllLinesAsync(petitionSpammer.CountiesFileName);
-            // load request body
+            _counties = File.ReadAllLines(CountiesFileName);
 
-            return petitionSpammer;
+            // setup http client for signing
+            //  base
+            _clientHandler = new() { AllowAutoRedirect = true, AutomaticDecompression = DecompressionMethods.Deflate | DecompressionMethods.GZip, Proxy = _proxy };
+            ClientWithProxy = new(ClientHandler);
+            ClientWithProxy.Timeout = TimeSpan.FromMilliseconds(proxyTimeoutMs);
+            //  headers
+            ClientWithProxy.DefaultRequestHeaders.Accept.ParseAdd("text/javascript");
+            ClientWithProxy.DefaultRequestHeaders.Add("X-Requested-With", "XMLHttpRequest");
+
         }
 
         /// <summary>
@@ -95,11 +96,7 @@ namespace PetitionSpammer
         /// <returns>A task which can be used to see if the proccess is done or whatever.</returns>
         private async Task SetAuthenticityTokenAndCookie()
         {
-            HttpResponseMessage response = new();
-            using (Client = new())
-            {
-                response = await Client.GetAsync(PetitionUrl);
-            }
+            HttpResponseMessage response = await ClientWithoutProxy.GetAsync(PetitionUrl);
 
             string responseBody = await response.Content.ReadAsStringAsync(); // response body converted to string.
 
@@ -130,75 +127,75 @@ namespace PetitionSpammer
         }
 
         /// <summary>
-        /// Creates a new http client for the signing with new authenticity token and cookie.
+        /// Changes the http client for the signing with new authenticity token and cookie.
         /// </summary>
         /// <param name="proxy">The proxy to be used with the http client.</param>
-        /// <returns>An http client object configured with the given proxy for spamming petition signs.</returns>
-        public async Task<HttpClient> NewHttpClientForSign(string proxy)
+        public async Task ChangeClientProxyAndTokens(string proxy)
         {
             // Grabs new authenticity token and cookie.
             await SetAuthenticityTokenAndCookie();
-            // new http client instance with proxy
-            HttpClientHandler clientHandler = new()
-            {
-                AllowAutoRedirect = true,
-                AutomaticDecompression = DecompressionMethods.Deflate | DecompressionMethods.GZip,
-                Proxy = new WebProxy(new Uri($"http://{proxy}"))
-            };
 
-            Client = new(clientHandler);
+            // change proxy
+            ClientWithProxy.CancelPendingRequests();
+
+            // If the proxy is well formated the current proxy gets set if not it skips changing it. (some proxies can have a bad host or not be accepted by C#)
+            if (Uri.IsWellFormedUriString($"http://{proxy}", UriKind.Absolute))
+            {
+                Proxy.Address = new Uri($"http://{proxy}");
+            }
 
             // setup headers
-            Client.Timeout = TimeSpan.FromSeconds(3);
-            Client.DefaultRequestHeaders.Accept.ParseAdd("text/javascript");
-            Client.DefaultRequestHeaders.Add("Cookie", Cookie);
-            Client.DefaultRequestHeaders.Add("X-CSRF-Token", AuthenticityToken);
-            Client.DefaultRequestHeaders.Add("X-Requested-With", "XMLHttpRequest");
-
-            return Client;
+            ClientWithProxy.DefaultRequestHeaders.Remove("Cookie");
+            ClientWithProxy.DefaultRequestHeaders.Add("Cookie", Cookie);
+            ClientWithProxy.DefaultRequestHeaders.Remove("X-CSRF-Token");
+            ClientWithProxy.DefaultRequestHeaders.Add("X-CSRF-Token", AuthenticityToken);
         }
 
         /// <summary>
-        /// Recreates the http client for sign in the exact way newhttpclient method does but without setting new authenticity token and cookie.
+        /// Changes the http client for sign in the exact way newhttpclient method does but without setting new authenticity token and cookie.
         /// </summary>
         /// <param name="proxy">The proxy to be used with the http client.</param>
-        /// <returns>An http client object configured with the given proxy for spamming petition signs.</returns>
-        public HttpClient RecreateHttpClientForSign(string proxy)
+        public void ChangeClientProxy(string proxy)
         {
-            // new http client instance with proxy
-            HttpClientHandler clientHandler = new()
-            {
-                AllowAutoRedirect = true,
-                AutomaticDecompression = DecompressionMethods.Deflate | DecompressionMethods.GZip,
-                Proxy = new WebProxy(new Uri($"http://{proxy}"))
-            };
+            // change proxy
+            ClientWithProxy.CancelPendingRequests();
 
-            Client = new(clientHandler);
+            // If the proxy is well formated the current proxy gets set if not it skips changing it. (some proxies can have a bad host or not be accepted by C#)
+            if (Uri.IsWellFormedUriString($"http://{proxy}", UriKind.Absolute))
+            {
+                Proxy.Address = new Uri($"http://{proxy}");
+            }
 
             // setup headers
-            Client.Timeout = TimeSpan.FromSeconds(3);
-            Client.DefaultRequestHeaders.Accept.ParseAdd("text/javascript");
-            Client.DefaultRequestHeaders.Add("Cookie", Cookie);
-            Client.DefaultRequestHeaders.Add("X-CSRF-Token", AuthenticityToken);
-            Client.DefaultRequestHeaders.Add("X-Requested-With", "XMLHttpRequest");
-
-            return Client;
+            ClientWithProxy.DefaultRequestHeaders.Remove("Cookie");
+            ClientWithProxy.DefaultRequestHeaders.Add("Cookie", Cookie);
+            ClientWithProxy.DefaultRequestHeaders.Remove("X-CSRF-Token");
+            ClientWithProxy.DefaultRequestHeaders.Add("X-CSRF-Token", AuthenticityToken);
         }
 
         /// <summary>
         /// Signs the petition using the given HttpClient instance (configured by the object).
         /// </summary>
         /// <param name="client">HttpClient instance (configured by the object).</param>
-        /// <returns>The HttpResponseMessage received after doing the request to sign.</returns>
-        public async Task<HttpResponseMessage> SignPetition(HttpClient client)
+        /// <returns>True if petition was signed successfully, false if not.</returns>
+        public async Task<bool> SignPetition()
         {
             // modify content and convert request body
             FormUrlEncodedContent requestBody = GenRequestBody();
-            
+
             // do request
-            HttpResponseMessage response = await client.PostAsync(PetitionSignUrl, requestBody);
-            
-            return response;
+            HttpResponseMessage response = await ClientWithProxy.PostAsync(PetitionSignUrl, requestBody);
+
+            // check response
+            string responseContent = await response.Content.ReadAsStringAsync();
+            if (response.StatusCode == HttpStatusCode.OK && responseContent.Split("\"action\":\"signed\"").Length >= 2 && responseContent.Split("'Signed Petition'").Length >= 2)
+            {
+                return true;
+            }
+            else
+            {
+                return false;
+            }
         }
     }
 }
