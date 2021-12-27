@@ -4,6 +4,10 @@ An app designed to spam sign petitions on https://campaniamea.declic.ro/petition
 using proxies in order to avoid ip block and protect identity.
 Also multi threaded in order to ensure spamming more efficient.
 
+## How to run
+
+Change the config file first add it some actual values then run PetitionSpammer in a terminal window.
+
 ## About proxies
 
 The proxies are gathered from https://proxyscrape.com/free-proxy-list they are http proxies used with a 3000ms max timeout set. These proxies are slow because they are public and a lot o people just use them like this so if you want high speed you would want a paid service that can give you a fast proxy on demand, if you would get that and a request would take 1 second and 32 threads do it all together so there is 32 signs per second meaning 115200 per hours that would be insane, but also very expensive.
